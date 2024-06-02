@@ -1,0 +1,32 @@
+{
+  "dependencies": {
+    "@deepgram/sdk": "^3.3.3",
+    "@google-cloud/speech": "^6.5.0",
+    "axios": "^1.7.2",
+    "cross-fetch": "^4.0.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "form-data": "^4.0.0",
+    "fs": "^0.0.1-security",
+    "gtts": "^0.2.1",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "node-lame": "^1.3.2",
+    "nodemon": "^3.1.0",
+    "openai": "^4.47.3",
+    "speech-recorder": "^2.1.0",
+    "ws": "^8.17.0",
+    "@google/generative-ai": "^0.12.0"
+  },
+  "name": "server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  },
+  "author": "Richok",
+  "license": "ISC",
+  "description": ""
+}
