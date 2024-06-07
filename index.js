@@ -15,7 +15,13 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 let keepAlive;
 let transcript;
-let language = "en"
+let language = "ru";
+let teaching_language = "russian";
+
+let isProcessing = false;
+const requestQueue = [];
+const audioQueue = [];
+let isPlayingAudio = false;
 
 const setupDeepgram = (ws) => {
     const deepgram = deepgramClient.listen.live({
@@ -31,16 +37,16 @@ const setupDeepgram = (ws) => {
     }, 10 * 1000);
 
     deepgram.addListener(LiveTranscriptionEvents.Open, async () => {
-        deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+        deepgram.addListener(LiveTranscriptionEvents.Transcript, async (data) => {
             ws.send(JSON.stringify(data));
             transcript = data.channel.alternatives[0].transcript;
-            console.log(data)
 
             if (transcript === "") {
-
+                // TODO Turn off mic on client
             } else {
-                if (data.is_final === true & data.speech_final === true) {
-                    aiPrompt(transcript, ws);
+                if (data.is_final === true && data.speech_final === true) {
+                    requestQueue.push(transcript);
+                    processQueue(ws);
                 }
             }
         });
@@ -68,6 +74,36 @@ const setupDeepgram = (ws) => {
     return deepgram;
 };
 
+const processQueue = async (ws) => {
+    if (isProcessing || requestQueue.length === 0 || isPlayingAudio) {
+        return;
+    }
+
+    isProcessing = true;
+    const transcript = requestQueue.shift();
+    await aiPrompt(transcript, ws);
+    isProcessing = false;
+
+    if (requestQueue.length > 0) {
+        processQueue(ws);
+    }
+};
+
+const processAudioQueue = (ws) => {
+    if (isPlayingAudio || audioQueue.length === 0) {
+        return;
+    }
+
+    isPlayingAudio = true;
+    const audioBuffer = audioQueue.shift();
+
+    ws.send(audioBuffer, { binary: true }, () => {
+        isPlayingAudio = false;
+        processAudioQueue(ws);
+        processQueue(ws); // Resume processing AI prompts after audio finishes
+    });
+};
+
 wss.on("connection", (ws) => {
     console.log("socket: client connected");
     let deepgram = setupDeepgram(ws);
@@ -89,12 +125,11 @@ wss.on("connection", (ws) => {
     });
 });
 
-
 async function aiPrompt(prompt, ws) {
     try {
         console.log("Sending prompt to generative AI:", prompt);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const result = await model.generateContent(prompt + " Answer needs to be in that language:" + language);
+        const result = await model.generateContent(prompt + "You are Language Learning Assistant. You are here to help the user learn and practice the chosen language: " + language + ", remember don't use emojis and another type texts because you are tts.");
         const response = await result.response;
         const text = await response.text();
 
@@ -102,57 +137,63 @@ async function aiPrompt(prompt, ws) {
 
         ws.send(JSON.stringify({ response: text }));
 
-
-
-        // Check if language is Latvian
-        if (language && language.toLowerCase() === 'lv') {
-            // Use Narakeet TTS for Latvian language
-            await getAudioNarakeet(text, ws);
-        } else {
-            // Use Deepgram TTS for other languages
+        if (language && language.toLowerCase() === 'en') {
             await getAudioDeepgram(text, ws);
+        } else {
+            await getAudioGoogleTTS(text, ws);
         }
     } catch (error) {
         console.error("Error calling Generative AI API:", error);
     }
 }
 
-async function getAudioNarakeet(text, ws) {
+async function getAudioGoogleTTS(text, ws) {
     try {
         console.log("Requesting TTS for text:", text);
 
-        // Make HTTP request to Play.ht TTS API
-        // Replace 'YOUR_API_KEY' with your Play.ht API key
-        const apiKey = 'd61c6db767624ba392eb741ae66d1ba3';
-        const playhtUrl = 'https://api.play.ht/text-to-speech/streaming';
+        const apiKey = process.env.GEMINI_API_KEY;
+        const googleTTSUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
 
-        const formData = new FormData();
-        formData.append('text', encodeURIComponent(text)); // Ensure proper encoding
-        formData.append('voice', 'female');
-        formData.append('apikey', apiKey);
+        const requestBody = JSON.stringify({
+            input: {
+                text: text
+            },
+            voice: {
+                languageCode: language,
+                ssmlGender: 'FEMALE',
+            },
+            audioConfig: {
+                audioEncoding: 'linear16'
+            }
+        });
 
-        const response = await fetch(playhtUrl, {
+        const response = await fetch(googleTTSUrl, {
             method: 'POST',
-            body: formData,
-            headers: formData // Pass formData directly as headers
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: requestBody
         });
 
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
 
-        ws.on('error', (error) => {
-            console.error('WebSocket error:', error);
-        });
+        const responseData = await response.json();
+        const audioContent = responseData.audioContent;
 
-        response.body.pipe(ws, { end: true }); // Pipe the audio stream to the WebSocket connection
-
-        console.log("Audio stream sent to client");
+        if (audioContent) {
+            console.log("Audio data received from Google TTS");
+            const audioBuffer = Uint8Array.from(atob(audioContent), c => c.charCodeAt(0));
+            audioQueue.push(audioBuffer);
+            processAudioQueue(ws);
+        } else {
+            console.error("Error generating audio: No data received");
+        }
     } catch (error) {
         console.error("TTS error:", error);
     }
 }
-
 
 async function getAudioDeepgram(text, ws) {
     try {
@@ -171,8 +212,8 @@ async function getAudioDeepgram(text, ws) {
 
         if (audioData) {
             console.log("Audio data received from Deepgram");
-            ws.send(audioData, { binary: true }); // Send the buffer over WebSocket with binary flag
-            console.log("Audio data sent to client");
+            audioQueue.push(audioData);
+            processAudioQueue(ws);
         } else {
             console.error("Error generating audio: No data received");
         }
@@ -180,7 +221,6 @@ async function getAudioDeepgram(text, ws) {
         console.error("TTS error:", error);
     }
 }
-
 
 app.use(express.static("public/"));
 app.get("/", (req, res) => {

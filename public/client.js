@@ -12,39 +12,47 @@ async function getMicrophone() {
 }
 
 async function openMicrophone(microphone, socket) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         microphone.onstart = () => {
-            console.log("WebSocket connection opened");
+            console.log("Microphone started");
             document.body.classList.add("recording");
-            isMicrophoneActive = true; // Microphone is active when it starts
+            isMicrophoneActive = true;
             resolve();
         };
 
         microphone.onstop = () => {
-            console.log("WebSocket connection closed");
+            console.log("Microphone stopped");
             document.body.classList.remove("recording");
-            isMicrophoneActive = false; // Microphone is inactive when it stops
+            isMicrophoneActive = false;
         };
 
-        microphone.ondataavailable = (event) => {
+        microphone.ondataavailable = async (event) => {
             if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
                 socket.send(event.data);
             }
         };
 
-        microphone.start(1000);
+        try {
+            microphone.start(1000); // Collect data in chunks of 1000ms (1 second)
+        } catch (error) {
+            reject(error);
+        }
     });
 }
 
 async function closeMicrophone(microphone) {
-    microphone.stop();
+    if (microphone && microphone.state !== 'inactive') {
+        microphone.stop();
+    }
 }
 
 let isMicrophoneActive = false;
+let audioQueue = [];
+let isPlayingAudio = false;
+let microphone;
 
 async function start(socket) {
     const listenButton = document.querySelector("#record");
-    let microphone;
 
     console.log("client: waiting to open microphone");
 
@@ -59,16 +67,12 @@ async function start(socket) {
         } else {
             if (isMicrophoneActive) {
                 await closeMicrophone(microphone);
-                microphone = undefined;
-                isMicrophoneActive = false;
             } else {
-                microphone.start(1000);
-                isMicrophoneActive = true;
+                await openMicrophone(microphone, socket);
             }
         }
     });
 }
-
 
 function adjustFontSize(element) {
     const parent = element.parentElement;
@@ -83,6 +87,39 @@ function adjustFontSize(element) {
         element.style.fontSize = fontSize + 'px';
         element.style.lineHeight = lineHeight + 'px';
     }
+}
+
+async function playAudioQueue(socket) {
+    if (isPlayingAudio || audioQueue.length === 0) {
+        return;
+    }
+
+    isPlayingAudio = true;
+
+    // Turn off the microphone before playing audio
+    if (isMicrophoneActive) {
+        await closeMicrophone(microphone);
+    }
+
+    const audioUrl = audioQueue.shift();
+    const audio = new Audio(audioUrl);
+
+    audio.onended = async () => {
+        isPlayingAudio = false;
+
+        // Turn the microphone back on after the audio has finished playing
+        if (!isMicrophoneActive && microphone) {
+            await openMicrophone(microphone, socket);
+        }
+
+        await playAudioQueue(socket); // Play next audio in queue
+    };
+
+    audio.play().catch(error => {
+        console.error("Error playing audio:", error);
+        isPlayingAudio = false;
+        playAudioQueue(socket); // Continue with next audio in case of error
+    });
 }
 
 window.addEventListener("load", () => {
@@ -100,27 +137,23 @@ window.addEventListener("load", () => {
 
                 if (data.channel && data.channel.alternatives && data.channel.alternatives[0].transcript) {
                     captions.innerHTML = `<span>${data.channel.alternatives[0].transcript}</span>`;
-                    adjustFontSize(captions.querySelector('span')); // Adjust font size based on content
+                    adjustFontSize(captions.querySelector('span'));
                 }
 
                 if (data.response && data.response !== "") {
                     captions_ai.innerHTML = `<span>${data.response}</span>`;
-                    adjustFontSize(captions_ai.querySelector('span')); // Adjust font size based on content
+                    adjustFontSize(captions_ai.querySelector('span'));
                 }
-            } else if (event.data instanceof Blob) {
-                const blob = event.data;
-                const audioUrl = URL.createObjectURL(blob);
-                const audio = new Audio(audioUrl);
-                audio.play().catch(error => {
-                    console.error("Error playing audio:", error);
-                });
+            } else if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
+                const audioBlob = new Blob([event.data], { type: 'audio/mp3' }); // Use appropriate mime type
+                const audioUrl = URL.createObjectURL(audioBlob);
+
+                audioQueue.push(audioUrl); // Add audio URL to the queue
+                playAudioQueue(socket); // Play the audio queue
             }
+
         } catch (error) {
             console.error("Error parsing WebSocket message:", error);
         }
-    });
-
-    socket.addEventListener("close", () => {
-        console.log("WebSocket connection closed");
     });
 });
