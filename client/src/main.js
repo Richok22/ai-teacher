@@ -5,7 +5,6 @@ import { createPinia } from 'pinia'
 import App from './App.vue';
 import { createRouter, createWebHashHistory } from 'vue-router';
 import { routes } from './routes/routes.js';
-
 const pinia = createPinia();
 
 const router = createRouter({

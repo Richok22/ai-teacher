@@ -1,10 +1,3 @@
-<script setup>
-
-import Message from "../components/chat/message.vue";
-import Microphone from "../components/chat/microphone.vue";
-
-</script>
-
 <template>
   <h2>Chat</h2>
   <div class="chat-container">
@@ -16,43 +9,57 @@ import Microphone from "../components/chat/microphone.vue";
         <p>Chat</p>
       </div>
       <div class="chat-messages">
-        <message>
-
-        </message>
-        <message>
-
-        </message>
-        <message>
-
-        </message>
-        <message>
-
-        </message>
-        <message>
-
-        </message>
-
+        <Message v-for="(msg, index) in messagesStore.messages" :key="index" :message="msg" />
       </div>
       <div class="send_message">
-        <input type="text">
+        <input
+            type="text"
+            v-model="newMessage"
+            @keyup.enter="sendMessage"
+            placeholder="Type a message"
+        >
       </div>
     </div>
-    <microphone>
-
-    </microphone>
+    <Microphone @transcription="sendMessage" />
   </div>
 </template>
 
-<style scoped>
+<script setup>
+import { ref } from 'vue';
+import { useMessagesStore } from '/src/stores/messagesStore.js';
+import Message from "../components/chat/message.vue";
+import Microphone from "../components/chat/microphone.vue";
 
+const messagesStore = useMessagesStore();
+const newMessage = ref('');
+
+const sendMessage = async () => {
+  if (newMessage.value.trim()) {
+    messagesStore.addUserMessage(newMessage.value);
+
+    // Simulate an AI response
+    setTimeout(() => {
+      messagesStore.setLoadingMessage();
+
+      setTimeout(() => {
+        const aiResponse = `AI Response to: ${newMessage.value}`;
+        messagesStore.updateLoadingMessage(aiResponse);
+      }, 2000);
+    }, 500);
+
+    newMessage.value = '';
+  }
+};
+</script>
+
+<style scoped>
 .chat-container {
   display: grid;
   gap: 2.5rem;
   grid-template-columns: repeat(2, 1fr);
-
-  padding-block: 2rem ;
+  padding-block: 2rem;
   max-width: min(95%, 70rem);
-  margin-inline: auto ;
+  margin-inline: auto;
 }
 
 .ai {
@@ -67,7 +74,6 @@ import Microphone from "../components/chat/microphone.vue";
   background-color: #101110;
 }
 
-
 .title {
   border-radius: .75rem .75rem 0 0;
   padding: 1rem;
@@ -79,11 +85,12 @@ import Microphone from "../components/chat/microphone.vue";
 
 .chat-messages {
   border-radius: .75rem;
-  display: flex;
   overflow: auto;
-  flex-direction: column;
   max-height: 26.6rem;
   background-color: #101110;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .send_message {
@@ -94,11 +101,9 @@ import Microphone from "../components/chat/microphone.vue";
 }
 
 @media only screen and (max-width: 768px) {
- .chat-container {
+  .chat-container {
     grid-template-columns: repeat(1, 1fr);
-   margin-inline: unset;
+    margin-inline: unset;
   }
 }
-
-
 </style>
